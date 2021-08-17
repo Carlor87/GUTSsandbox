@@ -138,7 +138,7 @@ server <- function(input, output, session) {
     names(parms)<-c("ke","Kiw","kr","mi","bi","hb")
     time <- seq(0,100,by=0.1)
     Cw <- c(rep(0,length(time)))
-    Cw[c(1:200)]<-input$Cw
+    Cw[c(1:100)]<-input$Cw
     conc <- data.frame(time=time, Cw=Cw)
     state_vars <- c(Ci=0,Di=0,S=1)
     out_sd <- solve(c(parms,conc=conc), state_vars, time)
