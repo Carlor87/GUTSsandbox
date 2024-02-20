@@ -5,10 +5,10 @@
 # Parameters:
 # ke      = elimination rate constant. how rapidly the concentrations inside
 #           and outside even
-# Kiw     = bioconcentration factor, it measures affinity of body tissues wrt 
-#           affinity with the external medium 
+# Kiw     = bioconcentration factor, it measures affinity of body tissues wrt
+#           affinity with the external medium
 #           (in steady state Body residual = Kiw * external conc.)
-# kr      = damage repair rate. Rate at which damage reaches equilibrium with 
+# kr      = damage repair rate. Rate at which damage reaches equilibrium with
 #           body residual
 # mi/mw   = median of threshold distribution (for IT case)
 # beta/Fs = spread factor of the threshold distribution
@@ -46,16 +46,16 @@ library(shinydashboard)
 #  - state: initial conditions of the state variables
 #  - parms: parameters (including forcing ones)
 #  - approxfun: auxiliary function to allow time dependent ext. concentration
-guts_equations_sd <- function(t, state, parms, approxfun){
+guts_equations_sd_comp <- function(t, state, parms, approxfun){
   ## as it is a toy model, the arguments are called this way, keeping names
   with(as.list(c(state, parms)),{
     inputCw <- approxfun(x = conc.time, y = conc.Cw, rule = 2)
-    cw <- cbind(inputCw(t)) 
+    cw <- cbind(inputCw(t))
     dCi <- ke * (Kiw * cw - Ci)
     dDi <- kr * (Ci - Di)
     hz <- bi * max(0, Di - mi) + hb
     dS <- -hz * S
-    
+
     list(c(dCi, dDi, dS))
   })
 }
@@ -74,6 +74,29 @@ guts_equations_it <- function(t, state, parms, approxfun){
   })
 }
 
+guts_red_sd <- function(t, state, parms, approxfun){
+  ## as it is a toy model, the arguments are called this way, keeping names
+  with(as.list(c(state, parms)),{
+    inputCw <- approxfun(x = conc.time, y = conc.Cw, rule = 2)
+    cw <- cbind(inputCw(t))
+    dDi <- k * (cw - Di)
+    hz <- bi * max(0, Di - mi) + hb
+    dS <- -hz * S
+    
+    list(c(dDi, dS))
+  })
+}
+
+guts_red_it <- function(t, state, parms, approxfun){
+  ## as it is a toy model, the arguments are called this way, keeping names
+  with(as.list(c(state, parms)),{
+    cw <- cbind(inputCw(t))
+    dCi <- ke * (Kiw * cw - Ci)
+    dDi <- kr * (Ci - Di)
+    dS <- 0
+    list(c(dCi, dDi, dS))
+  })
+}
 
 compute_survival <-function(time, state, parms, ode_res, approxfun){
   damagetemp<-0
@@ -99,13 +122,13 @@ cumulative_loglogistic <- function(x, m, beta){
 # Solve the differential equation for GUTS SD or IT
 solve <- function(parameters, initial, time,modeltype="SD"){
   if (modeltype=="SD"){
-    out_sd <- ode(y=initial, times=time, func=guts_equations_sd, 
+    out_sd <- ode(y=initial, times=time, func=guts_red_sd,
                   parms = parameters,
                   approxfun = approxfun)
     out <- as.data.frame(out_sd)
   }
   if (modeltype == "IT"){
-    out_it <- ode(y=state_vars, times=time, func=guts_equations_it, 
+    out_it <- ode(y=state_vars, times=time, func=guts_equations_it,
                   parms = c(parms, conc=conce),
                   approxfun = approxfun)
     out_it <- as.data.frame(out_it)
@@ -119,11 +142,17 @@ solve <- function(parameters, initial, time,modeltype="SD"){
 # call the user interface object
 ui <- dashboardPage(
   dashboardHeader(title="GUTS SD model"),
-  dashboardSidebar(sliderInput("Cw","External Concentration", min=0, max=10, step=0.1, value=2),
-                   sliderInput("ke","Elimination rate", min=0., max=5, step=0.1, value=0.5),
-                   sliderInput("Kiw","Bioconcentration factor", min=0., max=2, step=0.1, value=1),
-                   sliderInput("kr","Damage repair rate", min=0., max=5, step=0.1, value=0.5),
-                   sliderInput("mi","Threshold", min=0., max=10, step=0.1, value=1.5),
+  # dashboardSidebar(sliderInput("Cw","External Concentration", min=0, max=10, step=0.1, value=2),
+  #                  sliderInput("ke","Elimination rate", min=0., max=5, step=0.1, value=0.5),
+  #                  sliderInput("Kiw","Bioconcentration factor", min=0., max=2, step=0.1, value=1),
+  #                  sliderInput("kr","Damage repair rate", min=0., max=5, step=0.1, value=0.5),
+  #                  sliderInput("mi","Threshold", min=0., max=10, step=0.1, value=1.5),
+  #                  sliderInput("bi","Killing rate", min=0., max=2, step=0.1, value=0.5),
+  #                  sliderInput("hb","Background hazard", min=0., max=0.01, step=0.001, value=0.001)
+  #                  ),
+  dashboardSidebar(sliderInput("Cw","External Concentration", min=0, max=10, step=0.1, value=5),
+                   sliderInput("k","Damage Repair/Elimination rate", min=0., max=5, step=0.1, value=0.5),
+                   sliderInput("mi","Threshold", min=0., max=10, step=0.1, value=3),
                    sliderInput("bi","Killing rate", min=0., max=2, step=0.1, value=0.5),
                    sliderInput("hb","Background hazard", min=0., max=0.01, step=0.001, value=0.001)
                    ),
@@ -132,22 +161,28 @@ ui <- dashboardPage(
   ))
 
 # Function that actually call the computations and produces the plots
-server <- function(input, output, session) { 
+server <- function(input, output, session) {
   output$guts <- renderPlot({
-    parms <- c(input$ke, input$Kiw, input$kr, input$mi, input$bi, input$hb)
-    names(parms)<-c("ke","Kiw","kr","mi","bi","hb")
-    time <- seq(0,100,by=0.1)
+    # parms <- c(input$ke, input$Kiw, input$kr, input$mi, input$bi, input$hb)
+    # names(parms)<-c("ke","Kiw","kr","mi","bi","hb")
+    parms <- c(input$k, input$mi, input$bi, input$hb)
+    names(parms)<-c("k","mi","bi","hb")
+    time <- seq(0,14,by=0.01)
     Cw <- c(rep(0,length(time)))
-    Cw[c(1:100)]<-input$Cw
+    Cw[c(1:700)]<-input$Cw
     conc <- data.frame(time=time, Cw=Cw)
-    state_vars <- c(Ci=0,Di=0,S=1)
+    state_vars <- c(Di=0,S=1)
     out_sd <- solve(c(parms,conc=conc), state_vars, time)
-    plotCi <- ggplot(out_sd) + geom_line(aes(x=time, y=Ci), size=1) +
-      xlab("Time [a.u.]") + ylab("Internal concentration [a.u.]")
-    plotDi <- ggplot(out_sd) + geom_line(aes(x=time, y=Di), size=1) +
-      xlab("Time [a.u.]") + ylab("Internal Damage [a.u.]")
-    plotS <- ggplot(out_sd) + geom_line(aes(x=time, y=S), size=1) +
-      xlab("Time [a.u.]") + ylab("Survival probability")
+    plotCi <- ggplot(out_sd) + geom_line(aes(x=time, y=Cw), linewidth=1) +
+      xlab("Time [a.u.]") + ylab("External concentration [a.u.]")+
+      theme(text=element_text(size=14))
+    plotDi <- ggplot(out_sd,aes(x=time, y=Di)) + geom_line(linewidth=1) +
+      xlab("Time [a.u.]") + ylab("Internal Damage [a.u.]")+
+      geom_hline(yintercept=input$mi, linetype=2)+
+      theme(text=element_text(size=14))
+    plotS <- ggplot(out_sd) + geom_line(aes(x=time, y=S), linewidth=1) +
+      xlab("Time [a.u.]") + ylab("Survival probability")+ylim(0,1)+
+      theme(text=element_text(size=14))
     plot_grid(plotCi, plotDi, plotS, ncol = 1)
   }, height = 750)
 }
