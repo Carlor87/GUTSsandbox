@@ -58,6 +58,7 @@ compute_survival <-function(time, state, parms, ode_res, approxfun){
 
 cumulative_loglogistic <- function(x, m, beta){
   cumulative <- 1. / (1 + (x / m)^(-beta))
+  return(cumulative)
 }
 
 
@@ -90,23 +91,36 @@ cumulative_loglogistic <- function(x, m, beta){
 parms <- c(ke=0.9, 
            Kiw=1., 
            kr=0.3,
+           k=0.3,
            mi=2.5,
-           beta=10,
-           bi=0.5,
+           beta=2,
+           bi=0.1,
            hb=0)
 
 state_vars <- c(Ci=0,
                 Di=0,
                 S=1)
+state_vars2 <- c(Di=0,
+                S=1)
 
-time <- seq(0,100,by=0.1)
+
+time <- seq(0,7,by=0.1)
 extc <- 2  # external concentration
 Cw <- c(rep(0,length(time)))
-Cw[c(1:200)]<-2.2
-Cw[c(601:700)]<-2.5
+Cw[c(1:40)]<-5
+Cw[c(40:70)]<-0
 conce <- data.frame(time=time, Cw=Cw)
 
-
+guts_red_it <- function(t, state, parms, approxfun){
+  ## as it is a toy model, the arguments are called this way, keeping names
+  with(as.list(c(state, parms)),{
+    inputCw <- approxfun(x = conc.time, y = conc.Cw, rule = 2)
+    cw <- cbind(inputCw(t))
+    dDi <- k * (cw - Di)
+    dS <- 0
+    list(c(dDi, dS))
+  })
+}
 
 solve <- function(parameters, initial, time,modeltype="SD"){
   if (modeltype=="SD"){
@@ -120,7 +134,7 @@ solve <- function(parameters, initial, time,modeltype="SD"){
                   parms = c(parms, conc=conce),
                   approxfun = approxfun)
     out_it <- as.data.frame(out_it)
-    out <- compute_survival(time, state_vars, parms, out_it, approxfun)
+    out <- compute_survival(time, initial, parms, out_it, approxfun)
   }
   return(out)
 }
@@ -161,6 +175,40 @@ solve_and_plot <- function(parameters, initial, time, modeltype="SD"){
 }
 
 
+solve_and_plot2 <- function(parameters, initial, time, modeltype="IT"){
+  plotpdf<-NULL
+  if (modeltype=="SD"){
+    out_sd <- ode(y=initial, times=time, func=guts_equations_sd, 
+                  parms = parameters,
+                  approxfun = approxfun)
+    out <- as.data.frame(out_sd)
+  }
+  if (modeltype == "IT"){
+    out_it <- ode(y=state_vars2, times=time, func=guts_red_it, 
+                  parms = c(parms, conc=conce),
+                  approxfun = approxfun)
+    out_it <- as.data.frame(out_it)
+    out <- compute_survival(time, state_vars2, parms, out_it, approxfun)
+    xvals <- seq(0,log10(parms["mi"]*10^(3*parms["mi"])),by=0.1)
+    yvals <- actuar::dllogis(xvals,shape = parameters$beta, scale = parameters$mi)
+    pdfdata<-as.data.frame(cbind(xvals, yvals))
+    plotpdf <- ggplot(pdfdata) + geom_line(aes(x=xvals, y=yvals), size=1) +
+      xlab("Threshold") + ylab("pdf")
+  }
+  plotDi <- ggplot(out) + geom_line(aes(x=time, y=Di), size=1) +
+    xlab("Time [a.u.]") + ylab("Internal Damage [a.u.]")
+  plotS <- ggplot(out) + geom_line(aes(x=time, y=S), size=1) +
+    xlab("Time [a.u.]") + ylab("Survival probability")
+  if (is.null(plotpdf)){
+    p<-plot_grid(plotCi, plotDi, plotS)
+  }
+  else {
+    p<-plot_grid(plotDi, plotS, plotpdf)
+  }
+  return(p)
+}
+
 solve_and_plot(c(parms, conc=conce), state_vars, time, modeltype = "SD")
 solve_and_plot(c(parms, conc=conce), state_vars, time, modeltype = "IT")
+solve_and_plot2(c(parms, conc=conce), state_vars, time, modeltype = "IT")
 

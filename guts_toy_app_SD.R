@@ -28,8 +28,6 @@
 ### TODO:
 # Optimize the design of the sliders with more intelligent parameters
 
-
-
 library(deSolve)
 library(ggplot2)
 library(reshape)
@@ -46,33 +44,6 @@ library(shinydashboard)
 #  - state: initial conditions of the state variables
 #  - parms: parameters (including forcing ones)
 #  - approxfun: auxiliary function to allow time dependent ext. concentration
-guts_equations_sd_comp <- function(t, state, parms, approxfun){
-  ## as it is a toy model, the arguments are called this way, keeping names
-  with(as.list(c(state, parms)),{
-    inputCw <- approxfun(x = conc.time, y = conc.Cw, rule = 2)
-    cw <- cbind(inputCw(t))
-    dCi <- ke * (Kiw * cw - Ci)
-    dDi <- kr * (Ci - Di)
-    hz <- bi * max(0, Di - mi) + hb
-    dS <- -hz * S
-
-    list(c(dCi, dDi, dS))
-  })
-}
-
-# implementation for the IT case more difficult, need to find
-# right way to import the loglogistic function in R
-# TO BE DONE
-guts_equations_it <- function(t, state, parms, approxfun){
-  with(as.list(c(state, parms)),{
-    inputCw <- approxfun(x = conc.time, y = conc.Cw, rule = 2)
-    cw <- cbind(inputCw(t))
-    dCi <- ke * (Kiw * cw - Ci)
-    dDi <- kr * (Ci - Di)
-    dS <- 0
-    list(c(dCi, dDi, dS))
-  })
-}
 
 guts_red_sd <- function(t, state, parms, approxfun){
   ## as it is a toy model, the arguments are called this way, keeping names
@@ -87,53 +58,12 @@ guts_red_sd <- function(t, state, parms, approxfun){
   })
 }
 
-guts_red_it <- function(t, state, parms, approxfun){
-  ## as it is a toy model, the arguments are called this way, keeping names
-  with(as.list(c(state, parms)),{
-    cw <- cbind(inputCw(t))
-    dCi <- ke * (Kiw * cw - Ci)
-    dDi <- kr * (Ci - Di)
-    dS <- 0
-    list(c(dCi, dDi, dS))
-  })
-}
-
-compute_survival <-function(time, state, parms, ode_res, approxfun){
-  damagetemp<-0
-  output <- ode_res
-  with(as.list(c(state, parms)),{
-    inputD <- approxfun(x=ode_res$time, ode_res$Di, rule=2)
-    for (i in 1:length(time)){
-      Sb <- exp(-hb*time[i])
-      damage<-inputD(time[i])
-      if (damage>damagetemp){damagetemp<-damage}
-      Surv <- Sb * (1 - cumulative_loglogistic(damagetemp, mi, beta))
-      output$S[i] <- Surv
-    }
-    return(as.data.frame(output))
-  })
-}
-
-cumulative_loglogistic <- function(x, m, beta){
-  cumulative <- 1. / (1 + (x / m)^(-beta))
-}
-
-
 # Solve the differential equation for GUTS SD or IT
-solve <- function(parameters, initial, time,modeltype="SD"){
-  if (modeltype=="SD"){
+solve <- function(parameters, initial, time){
     out_sd <- ode(y=initial, times=time, func=guts_red_sd,
                   parms = parameters,
                   approxfun = approxfun)
     out <- as.data.frame(out_sd)
-  }
-  if (modeltype == "IT"){
-    out_it <- ode(y=state_vars, times=time, func=guts_equations_it,
-                  parms = c(parms, conc=conce),
-                  approxfun = approxfun)
-    out_it <- as.data.frame(out_it)
-    out <- compute_survival(time, state_vars, parms, out_it, approxfun)
-  }
   return(out)
 }
 
@@ -142,14 +72,6 @@ solve <- function(parameters, initial, time,modeltype="SD"){
 # call the user interface object
 ui <- dashboardPage(
   dashboardHeader(title="GUTS SD model"),
-  # dashboardSidebar(sliderInput("Cw","External Concentration", min=0, max=10, step=0.1, value=2),
-  #                  sliderInput("ke","Elimination rate", min=0., max=5, step=0.1, value=0.5),
-  #                  sliderInput("Kiw","Bioconcentration factor", min=0., max=2, step=0.1, value=1),
-  #                  sliderInput("kr","Damage repair rate", min=0., max=5, step=0.1, value=0.5),
-  #                  sliderInput("mi","Threshold", min=0., max=10, step=0.1, value=1.5),
-  #                  sliderInput("bi","Killing rate", min=0., max=2, step=0.1, value=0.5),
-  #                  sliderInput("hb","Background hazard", min=0., max=0.01, step=0.001, value=0.001)
-  #                  ),
   dashboardSidebar(sliderInput("Cw","External Concentration", min=0, max=10, step=0.1, value=5),
                    sliderInput("k","Damage Repair/Elimination rate", min=0., max=5, step=0.1, value=0.5),
                    sliderInput("mi","Threshold", min=0., max=10, step=0.1, value=3),
@@ -163,8 +85,6 @@ ui <- dashboardPage(
 # Function that actually call the computations and produces the plots
 server <- function(input, output, session) {
   output$guts <- renderPlot({
-    # parms <- c(input$ke, input$Kiw, input$kr, input$mi, input$bi, input$hb)
-    # names(parms)<-c("ke","Kiw","kr","mi","bi","hb")
     parms <- c(input$k, input$mi, input$bi, input$hb)
     names(parms)<-c("k","mi","bi","hb")
     time <- seq(0,14,by=0.01)

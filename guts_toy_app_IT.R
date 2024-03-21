@@ -1,0 +1,127 @@
+### Implementation of a toy GUTS model in order to play
+##  with the parameters and have a more practical
+##  understanding of the functioning
+##
+# Parameters:
+# ke      = elimination rate constant. how rapidly the concentrations inside
+#           and outside even
+# Kiw     = bioconcentration factor, it measures affinity of body tissues wrt
+#           affinity with the external medium
+#           (in steady state Body residual = Kiw * external conc.)
+# kr      = damage repair rate. Rate at which damage reaches equilibrium with
+#           body residual
+# mi/mw   = median of threshold distribution (for IT case)
+# beta/Fs = spread factor of the threshold distribution
+# bi/bw   = killing rate. Determines the steepness of the probability to die
+#           when going above threshold
+# hb      = background hazard rate
+#
+# State variables:
+# Ci = internal concentration
+# Di = damage value
+# S  = survival probability
+#
+# System parameters
+# Cw = external concentration
+# N  = number of organisms ?
+
+### TODO:
+# Optimize the design of the sliders with more intelligent parameters
+
+
+
+library(deSolve)
+library(ggplot2)
+library(reshape)
+library(cowplot)
+library(plotly)
+library(shiny)
+library(shinydashboard)
+
+
+
+guts_red_it <- function(t, state, parms, approxfun){
+  ## as it is a toy model, the arguments are called this way, keeping names
+  with(as.list(c(state, parms)),{
+    inputCw <- approxfun(x = conc.time, y = conc.Cw, rule = 2)
+    cw <- cbind(inputCw(t))
+    dDi <- k * (cw - Di)
+    dS <- 0
+    list(c(dDi, dS))
+  })
+}
+
+compute_survival <-function(time, state, parms, ode_res, approxfun){
+  damagetemp<-0
+  output <- ode_res
+  with(as.list(c(state, parms)),{
+    inputD <- approxfun(x=ode_res$time, ode_res$Di, rule=2)
+    #damage=cbind(inputD(time))
+    for (i in 1:length(time)){
+      Sb <- exp(-hb*time[i])
+      damage<-inputD(time[i])
+      if (damage>damagetemp){damagetemp<-damage}
+      Surv <- Sb * (1 - cumulative_loglogistic(damagetemp, mi, bi))
+      output$S[i] <- Surv
+    }
+    return(as.data.frame(output))
+  })
+}
+
+cumulative_loglogistic <- function(x, m, beta){
+  cumulative <- 1. / (1 + (x / m)^(-beta))
+  return(cumulative)
+}
+
+# Solve the differential equation for GUTS SD or IT
+solve <- function(parameters, initial, time){
+    out_it <- ode(y=initial, times=time, func=guts_red_it,
+                  parms = parameters,
+                  approxfun = approxfun)
+    out_it <- as.data.frame(out_it)
+    out <- compute_survival(time, initial, parameters, out_it, approxfun)
+  return(out)
+}
+
+## MAIN CODE for the application
+# Base code taken from internet snippets
+# call the user interface object
+ui <- dashboardPage(
+  dashboardHeader(title="GUTS IT model"),
+  dashboardSidebar(sliderInput("Cw","External Concentration", min=0, max=10, step=0.1, value=5),
+                   sliderInput("k","Damage Repair/Elimination rate", min=0., max=5, step=0.1, value=0.5),
+                   sliderInput("mi","Individual Threshold", min=0., max=10, step=0.1, value=3),
+                   sliderInput("bi","Threshold width", min=1., max=20, step=0.5, value=2),
+                   sliderInput("hb","Background hazard", min=0., max=0.01, step=0.001, value=0.001)
+                   ),
+  dashboardBody(
+    fluidRow(box(plotOutput("guts"), height = 800, width = 750))
+  ))
+
+# Function that actually call the computations and produces the plots
+server <- function(input, output, session) {
+  output$guts <- renderPlot({
+    parms <- c(input$k, input$mi, input$bi, input$hb)
+    names(parms)<-c("k","mi","bi","hb")
+    time <- seq(0,14,by=0.01)
+    Cw <- c(rep(0,length(time)))
+    Cw[c(1:700)]<-input$Cw
+    conc <- data.frame(time=time, Cw=Cw)
+    state_vars <- c(Di=0,S=1)
+    out_sd <- solve(c(parms,conc=conc), state_vars, time)
+    plotCi <- ggplot(out_sd) + geom_line(aes(x=time, y=Cw), linewidth=1) +
+      xlab("Time [a.u.]") + ylab("External concentration [a.u.]")+
+      theme(text=element_text(size=14))
+    plotDi <- ggplot(out_sd,aes(x=time, y=Di)) + geom_line(linewidth=1) +
+      xlab("Time [a.u.]") + ylab("Internal Damage [a.u.]")+
+      geom_hline(yintercept=input$mi, linetype=2)+
+      theme(text=element_text(size=14))
+    plotS <- ggplot(out_sd) + geom_line(aes(x=time, y=S), linewidth=1) +
+      xlab("Time [a.u.]") + ylab("Survival probability")+ylim(0,1)+
+      theme(text=element_text(size=14))
+    plot_grid(plotCi, plotDi, plotS, ncol = 1)
+  }, height = 750)
+}
+
+# launch the applet
+shinyApp(ui, server)
